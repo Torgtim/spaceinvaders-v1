@@ -3,50 +3,68 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Space Rollers Mobile</title>
+    <title>Space Rollers: Extreme Edition</title>
     <style>
-        body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; touch-action: none; }
-        canvas { display: block; background: #000; }
-        #ui { position: absolute; top: 10px; left: 10px; font-size: 20px; pointer-events: none; z-index: 10; }
+        body { margin: 0; background: #000; color: #fff; font-family: 'Courier New', Courier, monospace; overflow: hidden; touch-action: none; }
+        canvas { display: block; background: #111; }
+        
+        #ui { 
+            position: absolute; top: 10px; left: 10px; 
+            font-size: 18px; pointer-events: none; z-index: 10; 
+            text-shadow: 1px 1px 0 #000;
+        }
         
         /* Kontroll-knapper */
         .controls {
             position: absolute; bottom: 20px; width: 100%;
-            display: flex; justify-content: space-between; padding: 0 20px; box-sizing: border-box;
-            z-index: 20;
+            display: flex; justify-content: space-between; padding: 0 30px; box-sizing: border-box;
+            z-index: 20; pointer-events: none; /* Lar klikk gå igjennom til canvas for skyting, men knappene har egne events */
         }
         .btn {
-            width: 80px; height: 80px;
-            background: rgba(255, 255, 255, 0.2);
-            border: 2px solid rgba(255, 255, 255, 0.5);
+            width: 70px; height: 70px;
+            background: rgba(255, 255, 255, 0.15);
+            border: 2px solid rgba(255, 255, 255, 0.4);
             border-radius: 50%;
             display: flex; align-items: center; justify-content: center;
-            font-size: 40px; color: white; user-select: none;
+            font-size: 30px; color: white; user-select: none;
+            pointer-events: auto; /* Aktiverer knappene igjen */
         }
-        .btn:active { background: rgba(255, 255, 255, 0.5); }
+        .btn:active { background: rgba(0, 255, 0, 0.3); border-color: #0f0; }
 
-        /* Rick Roll Overlay */
-        #rickRoll {
+        /* Game Over / Rick Roll Overlay */
+        #gameOverScreen {
             display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: #000; z-index: 100; flex-direction: column; align-items: center; justify-content: center;
         }
-        iframe { width: 90%; max-width: 560px; height: 315px; border: none; }
-        .restart-btn { margin-top: 20px; padding: 15px 30px; font-size: 18px; background: #f00; color: #fff; border: none; border-radius: 5px; }
+        video {
+            width: 100%; height: 80%; object-fit: contain;
+        }
+        .restart-btn { 
+            margin-top: 10px; padding: 15px 30px; font-size: 20px; font-weight: bold;
+            background: #ff0000; color: #fff; border: 2px solid #fff; border-radius: 50px; 
+            cursor: pointer; z-index: 101;
+        }
     </style>
 </head>
 <body>
 
-<div id="ui">Score: <span id="score">0</span></div>
+<div id="ui">
+    Score: <span id="score">0</span><br>
+    High Score: <span id="highScore">0</span><br>
+    <span id="powerText" style="color: yellow;"></span>
+</div>
 
 <div class="controls">
     <div class="btn" id="leftBtn">◀</div>
     <div class="btn" id="rightBtn">▶</div>
 </div>
 
-<div id="rickRoll">
-    <h2 style="color:#0f0; text-align:center;">GAME OVER?</h2>
-    <div id="videoContainer"></div>
-    <button class="restart-btn" onclick="location.reload()">PRØV IGJEN</button>
+<div id="gameOverScreen">
+    <h1 style="color: red; position: absolute; top: 5%;">GAME OVER</h1>
+    <video id="rickVideo" playsinline loop>
+        <source src="https://dn721809.ca.archive.org/0/items/youtube-xvFZjo5PgG0/xvFZjo5PgG0.mp4" type="video/mp4">
+    </video>
+    <button class="restart-btn" onclick="location.reload()">PRØV PÅ NYTT</button>
 </div>
 
 <canvas id="game"></canvas>
@@ -55,100 +73,225 @@
     const canvas = document.getElementById('game');
     const ctx = canvas.getContext('2d');
     const scoreEl = document.getElementById('score');
-    
+    const highScoreEl = document.getElementById('highScore');
+    const powerTextEl = document.getElementById('powerText');
+    const rickVideo = document.getElementById('rickVideo');
+
+    // Setup Canvas
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 
+    // Game State
     let score = 0;
+    let highScore = localStorage.getItem('spaceRollersHigh') || 0;
+    highScoreEl.innerText = highScore;
     let gameActive = true;
-    const bullets = [];
-    const enemies = [];
+    let difficulty = 1;
     
+    // Arrays
+    let bullets = [];
+    let enemies = [];
+    let powerups = [];
+    let particles = []; // Eksplosjonseffekter
+
+    // Player
     const player = {
         x: canvas.width / 2 - 20,
-        y: canvas.height - 120, // Flyttet opp for å gi plass til knapper
-        w: 40,
-        h: 30,
+        y: canvas.height - 130, // Litt høyere opp
+        w: 40, h: 30,
         speed: 8,
-        dir: 0
+        dir: 0,
+        powerUpType: null, // 'triple', 'slow'
+        powerUpTimer: 0
     };
 
-    // --- KONTROLL-LOGIKK ---
+    // --- INPUT HANDLERS ---
     const leftBtn = document.getElementById('leftBtn');
     const rightBtn = document.getElementById('rightBtn');
 
-    const startLeft = (e) => { e.preventDefault(); player.dir = -1; shoot(); };
-    const startRight = (e) => { e.preventDefault(); player.dir = 1; shoot(); };
+    // Bevegelse
+    const startLeft = (e) => { e.preventDefault(); player.dir = -1; };
+    const startRight = (e) => { e.preventDefault(); player.dir = 1; };
     const stopMove = (e) => { e.preventDefault(); player.dir = 0; };
 
     leftBtn.addEventListener('touchstart', startLeft);
     leftBtn.addEventListener('touchend', stopMove);
     rightBtn.addEventListener('touchstart', startRight);
     rightBtn.addEventListener('touchend', stopMove);
-
-    // Støtte for mus (hvis du tester på PC)
+    
+    // PC støtte for bevegelse
     leftBtn.addEventListener('mousedown', startLeft);
-    window.addEventListener('mouseup', stopMove);
     rightBtn.addEventListener('mousedown', startRight);
+    window.addEventListener('mouseup', stopMove);
+
+    // KLIKK HVOR SOM HELST FOR Å SKYTE (Touch + Click)
+    canvas.addEventListener('touchstart', handleShootInput);
+    canvas.addEventListener('mousedown', handleShootInput);
+
+    function handleShootInput(e) {
+        if (!gameActive) return;
+        // Sjekk at vi ikke trykker på knappene (selv om preventDefault ofte stopper det)
+        if (e.target.className.includes('btn')) return;
+        
+        shoot();
+    }
 
     function shoot() {
-        if (!gameActive) return;
-        bullets.push({ x: player.x + player.w/2 - 2, y: player.y, w: 4, h: 10 });
+        if (player.powerUpType === 'triple') {
+            // Triple shot
+            bullets.push({ x: player.x, y: player.y, w: 4, h: 10, vx: -2 });
+            bullets.push({ x: player.x + 20, y: player.y - 5, w: 4, h: 10, vx: 0 }); // Midten
+            bullets.push({ x: player.x + 40, y: player.y, w: 4, h: 10, vx: 2 });
+        } else {
+            // Vanlig skudd
+            bullets.push({ x: player.x + player.w/2 - 2, y: player.y, w: 5, h: 12, vx: 0 });
+        }
     }
 
     function spawnEnemy() {
         if (!gameActive) return;
-        const size = 35;
+        const size = Math.random() * 20 + 20; // Variert størrelse
         enemies.push({
             x: Math.random() * (canvas.width - size),
             y: -size,
             w: size,
             h: size,
-            speed: 2 + (score / 150)
+            speed: (Math.random() * 2 + 2) * difficulty // Farten øker med difficulty
         });
-        setTimeout(spawnEnemy, Math.max(300, 1000 - (score * 2)));
+        
+        // Spawn rate øker med difficulty (minimum 200ms)
+        let nextSpawnTime = Math.max(200, 1000 - (score * 5));
+        setTimeout(spawnEnemy, nextSpawnTime);
     }
 
-    function triggerRickRoll() {
-        if(!gameActive) return;
+    function spawnPowerUp() {
+        if (!gameActive) return;
+        // 20% sjanse for powerup
+        if (Math.random() > 0.8) { 
+            const type = Math.random() > 0.5 ? 'triple' : 'slow';
+            const color = type === 'triple' ? '#f0f' : '#0ff'; // Lilla eller Cyan
+            powerups.push({
+                x: Math.random() * (canvas.width - 30),
+                y: -30, w: 25, h: 25, speed: 3,
+                type: type, color: color
+            });
+        }
+        setTimeout(spawnPowerUp, 5000); // Prøv å spawne hvert 5. sekund
+    }
+
+    function createExplosion(x, y, color) {
+        for(let i=0; i<10; i++) {
+            particles.push({
+                x: x, y: y,
+                vx: (Math.random() - 0.5) * 10,
+                vy: (Math.random() - 0.5) * 10,
+                life: 1.0,
+                color: color
+            });
+        }
+    }
+
+    function gameOver() {
+        if (!gameActive) return;
         gameActive = false;
-        document.getElementById('rickRoll').style.display = 'flex';
-        document.getElementById('videoContainer').innerHTML = 
-            '<iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1" allow="autoplay"></iframe>';
+        
+        // Lagre High Score
+        if (score > highScore) {
+            localStorage.setItem('spaceRollersHigh', score);
+        }
+
+        // Vis video
+        document.getElementById('gameOverScreen').style.display = 'flex';
+        rickVideo.play().catch(e => console.log("Autoplay blocket, krever interaksjon"));
     }
 
     function update() {
         if (!gameActive) return;
 
+        // Øk vanskelighetsgrad basert på score
+        difficulty = 1 + (score / 500); 
+
+        // Spiller bevegelse
         player.x += player.dir * player.speed;
         if (player.x < 0) player.x = 0;
         if (player.x > canvas.width - player.w) player.x = canvas.width - player.w;
 
-        bullets.forEach((b, i) => {
-            b.y -= 12;
-            if (b.y < 0) bullets.splice(i, 1);
-        });
+        // Power-up timer
+        if (player.powerUpTimer > 0) {
+            player.powerUpTimer--;
+            if (player.powerUpTimer <= 0) {
+                player.powerUpType = null;
+                powerTextEl.innerText = "";
+            }
+        }
 
-        enemies.forEach((en, i) => {
-            en.y += en.speed;
+        // Oppdater kuler
+        for (let i = bullets.length - 1; i >= 0; i--) {
+            let b = bullets[i];
+            b.y -= 12;
+            b.x += b.vx;
+            if (b.y < 0) bullets.splice(i, 1);
+        }
+
+        // Oppdater Powerups
+        for (let i = powerups.length - 1; i >= 0; i--) {
+            let p = powerups[i];
+            p.y += p.speed;
             
-            // Sjekk kollisjon med spiller
-            if (en.y + en.h > player.y && en.x < player.x + player.w && en.x + en.w > player.x) {
-                triggerRickRoll();
+            // Kollisjon med spiller
+            if (p.x < player.x + player.w && p.x + p.w > player.x &&
+                p.y < player.y + player.h && p.y + p.h > player.y) {
+                    
+                if (p.type === 'triple') {
+                    player.powerUpType = 'triple';
+                    player.powerUpTimer = 600; // 10 sekunder (60fps)
+                    powerTextEl.innerText = "TRIPLE SHOT!";
+                    powerTextEl.style.color = "#f0f";
+                } else if (p.type === 'slow') {
+                    enemies.forEach(e => e.speed *= 0.1); // Brems alle fiender
+                    powerTextEl.innerText = "FREEZE!";
+                    powerTextEl.style.color = "#0ff";
+                    setTimeout(() => powerTextEl.innerText = "", 2000);
+                }
+                powerups.splice(i, 1);
+            } else if (p.y > canvas.height) {
+                powerups.splice(i, 1);
+            }
+        }
+
+        // Oppdater Fiender
+        for (let i = enemies.length - 1; i >= 0; i--) {
+            let en = enemies[i];
+            en.y += en.speed;
+
+            // Kollisjon med spiller
+            if (en.x < player.x + player.w && en.x + en.w > player.x &&
+                en.y < player.y + player.h && en.y + en.h > player.y) {
+                gameOver();
             }
 
-            // Sjekk skudd
-            bullets.forEach((b, bi) => {
-                if (b.x < en.x + en.w && b.x + b.w > en.x && b.y < en.y + en.h && b.y + b.h > en.y) {
+            // Kollisjon med skudd
+            for (let j = bullets.length - 1; j >= 0; j--) {
+                let b = bullets[j];
+                if (b.x < en.x + en.w && b.x + b.w > en.x &&
+                    b.y < en.y + en.h && b.y + b.h > en.y) {
+                    
+                    createExplosion(en.x + en.w/2, en.y + en.h/2, '#fa0');
                     enemies.splice(i, 1);
-                    bullets.splice(bi, 1);
+                    bullets.splice(j, 1);
                     score += 10;
                     scoreEl.innerText = score;
+                    break; // Gå ut av bullet loop
                 }
-            });
+            }
 
-            // Hvis fienden når bunnen (knappene)
-            if (en.y > canvas.height - 50) triggerRickRoll();
+            if (en.y > canvas.height) gameOver();
+        }
+
+        // Partikler
+        particles.forEach((p, i) => {
+            p.x += p.vx; p.y += p.vy; p.life -= 0.05;
+            if(p.life <= 0) particles.splice(i, 1);
         });
 
         draw();
@@ -156,28 +299,60 @@
     }
 
     function draw() {
-        ctx.fillStyle = '#000';
+        // Fjern spor litt for "motion blur" effekt hvis man vil, men her clearer vi helt
+        ctx.fillStyle = '#111';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // Tegn spiller (Romskip-ish)
-        ctx.fillStyle = '#0f0';
-        ctx.fillRect(player.x, player.y, player.w, player.h);
-        ctx.fillRect(player.x + 15, player.y - 10, 10, 10); // Liten topp
+        // Stjerner i bakgrunnen (statisk for nå, kunne animeres)
+        ctx.fillStyle = '#fff';
+        if (Math.random() > 0.9) ctx.fillRect(Math.random()*canvas.width, Math.random()*canvas.height, 2, 2);
 
-        // Tegn skudd
+        // Spiller
+        ctx.fillStyle = player.powerUpType === 'triple' ? '#f0f' : '#0f0';
+        ctx.beginPath();
+        ctx.moveTo(player.x, player.y + player.h);
+        ctx.lineTo(player.x + player.w/2, player.y);
+        ctx.lineTo(player.x + player.w, player.y + player.h);
+        ctx.fill();
+
+        // Kuler
         ctx.fillStyle = '#ff0';
         bullets.forEach(b => ctx.fillRect(b.x, b.y, b.w, b.h));
 
-        // Tegn fiender (UFO-aktig)
+        // Fiender
         ctx.fillStyle = '#f00';
         enemies.forEach(en => {
-            ctx.fillRect(en.x, en.y + 10, en.w, 15);
-            ctx.fillRect(en.x + 10, en.y, 15, 35);
+            ctx.fillRect(en.x, en.y, en.w, en.h);
+            // Øyne
+            ctx.fillStyle = '#000';
+            ctx.fillRect(en.x + 5, en.y + 10, 5, 5);
+            ctx.fillRect(en.x + en.w - 10, en.y + 10, 5, 5);
+            ctx.fillStyle = '#f00';
+        });
+
+        // Powerups
+        powerups.forEach(p => {
+            ctx.fillStyle = p.color;
+            ctx.fillRect(p.x, p.y, p.w, p.h);
+            ctx.fillStyle = '#fff';
+            ctx.font = "12px Arial";
+            ctx.fillText("?", p.x + 8, p.y + 18);
+        });
+
+        // Partikler
+        particles.forEach(p => {
+            ctx.globalAlpha = p.life;
+            ctx.fillStyle = p.color;
+            ctx.fillRect(p.x, p.y, 4, 4);
+            ctx.globalAlpha = 1.0;
         });
     }
 
+    // Start loopen
     spawnEnemy();
+    spawnPowerUp();
     update();
+
 </script>
 </body>
 </html>
