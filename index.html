@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Space Rollers Mobile</title>
+    <style>
+        body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; touch-action: none; }
+        canvas { display: block; background: #000; }
+        #ui { position: absolute; top: 10px; left: 10px; font-size: 20px; pointer-events: none; z-index: 10; }
+        
+        /* Kontroll-knapper */
+        .controls {
+            position: absolute; bottom: 20px; width: 100%;
+            display: flex; justify-content: space-between; padding: 0 20px; box-sizing: border-box;
+            z-index: 20;
+        }
+        .btn {
+            width: 80px; height: 80px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 40px; color: white; user-select: none;
+        }
+        .btn:active { background: rgba(255, 255, 255, 0.5); }
+
+        /* Rick Roll Overlay */
+        #rickRoll {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; z-index: 100; flex-direction: column; align-items: center; justify-content: center;
+        }
+        iframe { width: 90%; max-width: 560px; height: 315px; border: none; }
+        .restart-btn { margin-top: 20px; padding: 15px 30px; font-size: 18px; background: #f00; color: #fff; border: none; border-radius: 5px; }
+    </style>
+</head>
+<body>
+
+<div id="ui">Score: <span id="score">0</span></div>
+
+<div class="controls">
+    <div class="btn" id="leftBtn">◀</div>
+    <div class="btn" id="rightBtn">▶</div>
+</div>
+
+<div id="rickRoll">
+    <h2 style="color:#0f0; text-align:center;">GAME OVER?</h2>
+    <div id="videoContainer"></div>
+    <button class="restart-btn" onclick="location.reload()">PRØV IGJEN</button>
+</div>
+
+<canvas id="game"></canvas>
+
+<script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    let score = 0;
+    let gameActive = true;
+    const bullets = [];
+    const enemies = [];
+    
+    const player = {
+        x: canvas.width / 2 - 20,
+        y: canvas.height - 120, // Flyttet opp for å gi plass til knapper
+        w: 40,
+        h: 30,
+        speed: 8,
+        dir: 0
+    };
+
+    // --- KONTROLL-LOGIKK ---
+    const leftBtn = document.getElementById('leftBtn');
+    const rightBtn = document.getElementById('rightBtn');
+
+    const startLeft = (e) => { e.preventDefault(); player.dir = -1; shoot(); };
+    const startRight = (e) => { e.preventDefault(); player.dir = 1; shoot(); };
+    const stopMove = (e) => { e.preventDefault(); player.dir = 0; };
+
+    leftBtn.addEventListener('touchstart', startLeft);
+    leftBtn.addEventListener('touchend', stopMove);
+    rightBtn.addEventListener('touchstart', startRight);
+    rightBtn.addEventListener('touchend', stopMove);
+
+    // Støtte for mus (hvis du tester på PC)
+    leftBtn.addEventListener('mousedown', startLeft);
+    window.addEventListener('mouseup', stopMove);
+    rightBtn.addEventListener('mousedown', startRight);
+
+    function shoot() {
+        if (!gameActive) return;
+        bullets.push({ x: player.x + player.w/2 - 2, y: player.y, w: 4, h: 10 });
+    }
+
+    function spawnEnemy() {
+        if (!gameActive) return;
+        const size = 35;
+        enemies.push({
+            x: Math.random() * (canvas.width - size),
+            y: -size,
+            w: size,
+            h: size,
+            speed: 2 + (score / 150)
+        });
+        setTimeout(spawnEnemy, Math.max(300, 1000 - (score * 2)));
+    }
+
+    function triggerRickRoll() {
+        if(!gameActive) return;
+        gameActive = false;
+        document.getElementById('rickRoll').style.display = 'flex';
+        document.getElementById('videoContainer').innerHTML = 
+            '<iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1" allow="autoplay"></iframe>';
+    }
+
+    function update() {
+        if (!gameActive) return;
+
+        player.x += player.dir * player.speed;
+        if (player.x < 0) player.x = 0;
+        if (player.x > canvas.width - player.w) player.x = canvas.width - player.w;
+
+        bullets.forEach((b, i) => {
+            b.y -= 12;
+            if (b.y < 0) bullets.splice(i, 1);
+        });
+
+        enemies.forEach((en, i) => {
+            en.y += en.speed;
+            
+            // Sjekk kollisjon med spiller
+            if (en.y + en.h > player.y && en.x < player.x + player.w && en.x + en.w > player.x) {
+                triggerRickRoll();
+            }
+
+            // Sjekk skudd
+            bullets.forEach((b, bi) => {
+                if (b.x < en.x + en.w && b.x + b.w > en.x && b.y < en.y + en.h && b.y + b.h > en.y) {
+                    enemies.splice(i, 1);
+                    bullets.splice(bi, 1);
+                    score += 10;
+                    scoreEl.innerText = score;
+                }
+            });
+
+            // Hvis fienden når bunnen (knappene)
+            if (en.y > canvas.height - 50) triggerRickRoll();
+        });
+
+        draw();
+        requestAnimationFrame(update);
+    }
+
+    function draw() {
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Tegn spiller (Romskip-ish)
+        ctx.fillStyle = '#0f0';
+        ctx.fillRect(player.x, player.y, player.w, player.h);
+        ctx.fillRect(player.x + 15, player.y - 10, 10, 10); // Liten topp
+
+        // Tegn skudd
+        ctx.fillStyle = '#ff0';
+        bullets.forEach(b => ctx.fillRect(b.x, b.y, b.w, b.h));
+
+        // Tegn fiender (UFO-aktig)
+        ctx.fillStyle = '#f00';
+        enemies.forEach(en => {
+            ctx.fillRect(en.x, en.y + 10, en.w, 15);
+            ctx.fillRect(en.x + 10, en.y, 15, 35);
+        });
+    }
+
+    spawnEnemy();
+    update();
+</script>
+</body>
+</html>
